@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# ga - manage Google authenticator (RFC6238) seeds
+# ttp - manage TOTP (RFC6238) seeds, compatible with Google Authenticator
 #
 # Copyright 2014 David Mazieres.  You may use and distribute this code
 # under the terms of the GPLv3 or later, and additionally you may link
@@ -14,7 +14,7 @@
 # SECURE THAN ANY ALTERNATIVE; it most likely is less secure.
 
 # Installation:
-#   Just put it somewhere on your path (e.g., $HOME/bin/ga).
+#   Just put it somewhere on your path (e.g., $HOME/bin/ttp).
 #
 # Requirements:
 #   bash, gnupg
@@ -34,7 +34,12 @@
 
 
 prog=${0##*/}
-keydir="${XDG_CONFIG_HOME-${HOME}/.config}/ga"
+confdir="${XDG_CONFIG_HOME-${HOME}/.config}"
+keydir="$confdir/ttp"
+# ttp was called ga, so keep using its keys if they haven't been moved.
+if ! test -d "$keydir" && test -d "$confdir/ga"; then
+    keydir="$confdir/ga"
+fi
 gpgcmd="gpg"
 gpgoptions="--pinentry-mode loopback -q --no-mdc-warning"
 

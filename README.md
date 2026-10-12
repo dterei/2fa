@@ -1,4 +1,4 @@
-# ga: Google Authenticator in the Shell
+# ttp: TOTP Codes in the Shell
 
 Generate two factor authentication codes that are compatible with
 Google Authenticator (a.k.a. RFC6238 TOTP) from the shell.
@@ -10,19 +10,23 @@ Google Authenticator (a.k.a. RFC6238 TOTP) from the shell.
 ## Installing
 
 Just download and install
-[`ga`](https://raw.githubusercontent.com/scslab/ga/master/ga)
-somewhere on your path (e.g., `$HOME/bin/ga`).
+[`ttp`](https://raw.githubusercontent.com/dterei/2fa/master/ttp)
+somewhere on your path (e.g., `$HOME/bin/ttp`).
 
 Requirements:
 
 * bash
 * gnupg
 
-`ga` is a self-contained bash script; the TOTP code calculation
+`ttp` is a self-contained bash script; the TOTP code calculation
 (base32 decoding and HMAC-SHA1) is implemented in bash itself, so no C
-compiler or OpenSSL is needed. If you used an older version of `ga`
-that compiled a helper program, you can delete the leftover
-`~/.config/ga/bin` directory.
+compiler or OpenSSL is needed.
+
+`ttp` used to be called `ga`. It stores keys in `~/.config/ttp`, but
+if that doesn't exist and `~/.config/ga` does, it keeps using
+`~/.config/ga`. To switch over, run `mv ~/.config/ga ~/.config/ttp`.
+Older versions of `ga` compiled a helper program into
+`~/.config/ga/bin`; you can delete that directory.
 
 Optional dependencies:
 
@@ -32,10 +36,10 @@ Optional dependencies:
 
 ## Using
 
-* `ga [-x]` _service_ - get token for _service_
-* `ga -[x]c` _service_ - record seed for new _service_
-* `ga -[x]v` _service_ - view qrcode for _service_
-* `ga -l` - list services setup
+* `ttp [-x]` _service_ - get token for _service_
+* `ttp -[x]c` _service_ - record seed for new _service_
+* `ttp -[x]v` _service_ - view qrcode for _service_
+* `ttp -l` - list services setup
 
 The `-x`, `-xc`, and `-xv` flags disable use of X11 even when
 `$DISPLAY` is set, compared to no option, `-c`, and `-v`.
@@ -46,7 +50,7 @@ Mac OS X users may be using the [GPG Tools](https://gpgtools.org/)
 distribution. For some strange reason, this package doesn't detect
 when you are running in a terminal session without a display (e.g.,
 SSH), so by default, it always launches a GUI for key entry. Which
-makes `ga` impossible to use over SSH on OS X.
+makes `ttp` impossible to use over SSH on OS X.
 
 To fix this, you'll want to tell it to uses a curses display for
 passpharse entry:
