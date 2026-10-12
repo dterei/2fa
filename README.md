@@ -34,6 +34,7 @@ compiler or OpenSSL is needed.
 
 | Dependency | Used for | Without it |
 | --- | --- | --- |
+| `wl-copy` (from [wl-clipboard](https://github.com/bugaevc/wl-clipboard); Linux, Wayland) | Copying the code to the clipboard. | The code is printed, or copied with `xclip`/`xsel` if available. |
 | `xclip` or `xsel` (Linux, X11) | Copying the code to the clipboard. | The code is printed. |
 | `pbcopy` (built into macOS) | Copying the code to the clipboard. | The code is printed. |
 | `zbarimg` (from [zbar](https://github.com/mchehab/zbar)) | `-c`: reading a QR code from the screen (X11 only). | You type in the key. |
@@ -56,8 +57,14 @@ Older versions of `ga` compiled a helper program into
 * `ttp -[x]v` _service_ - view qrcode for _service_
 * `ttp -l` - list services setup
 
-The `-x`, `-xc`, and `-xv` flags disable use of X11 even when
-`$DISPLAY` is set, compared to no option, `-c`, and `-v`.
+Codes are copied to the clipboard you paste from with Ctrl-V (or
+Cmd-V on macOS) when a clipboard tool is available. The `-x`, `-xc`, and
+`-xv` flags disable use of X11 and Wayland even when they are available,
+compared to no option, `-c`, and `-v`: codes are printed, keys are typed
+in, and QR codes are drawn in the terminal.
+
+Service names are used as file names, so they can't contain `/` or
+start with `-` or `.`.
 
 A key can be a base32 secret or an `otpauth://totp/` URI, such as the
 ones in QR codes. URIs may set `digits` (1 to 10) and `period`; `ttp`
