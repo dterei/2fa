@@ -44,6 +44,8 @@ if ! test -d "$keydir" && test -d "$confdir/ga"; then
     keydir="$confdir/ga"
 fi
 gpgcmd="gpg"
+# Where gk reads answers from; the tests point it at a file.
+ttydev=/dev/tty
 gpgoptions=(--pinentry-mode loopback -q --no-mdc-warning)
 
 usage() {
@@ -236,18 +238,20 @@ totp() {
 # Pick an otpauth:// URI out of zbarimg output, asking which to use.
 gk() {
     local line nosecret account ans
+    # Stdin is zbarimg's output and stdout is captured, so ask on stderr
+    # and read the answers from the terminal.
     while IFS= read -r line; do
         nosecret="${line%%\?*}"
         account="${nosecret#QR-Code:otpauth://totp/}"
         if test x"$nosecret" != x"$account"; then
-            echo -n "Use $account? (y) " > /dev/tty
-            read -r ans < /dev/tty
+            echo -n "Use $account? (y) " >&2
+            read -r ans <&3
             if test x"$ans" = x -o y = "$ans" -o yes = "$ans"; then
                 echo "${line#QR-Code:}"
                 return
             fi
         fi
-    done
+    done 3< "$ttydev"
 }
 
 # Exit with an error unless a key is stored for service $1.
