@@ -227,8 +227,10 @@ totp() {
 
     hmac_sha1
     i=$(( sha1_out[19] & 15 ))
-    printf "%0${digits}d\n" $(( ((sha1_out[i] & 127) << 24 | sha1_out[i+1] << 16
-                                | sha1_out[i+2] << 8 | sha1_out[i+3]) % 10 ** digits ))
+    # Keep this on one line: bash 4.0 reads "<<" in arithmetic that
+    # spans lines as the start of a here-document.
+    p=$(( (sha1_out[i] & 127) << 24 | sha1_out[i+1] << 16 | sha1_out[i+2] << 8 | sha1_out[i+3] ))
+    printf "%0${digits}d\n" $(( p % 10 ** digits ))
 }
 
 # Pick an otpauth:// URI out of zbarimg output, asking which to use.
