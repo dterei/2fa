@@ -17,13 +17,15 @@
 #   Just put it somewhere on your path (e.g., $HOME/bin/ttp).
 #
 # Requirements:
-#   bash, gnupg
+#   bash, gnupg (plus mkdir, and date on bash < 5)
 #
-# Optional dependencies:
+# Optional dependencies (see README.md for details):
 #   xclip, xsel - to send login codes to the X clipboard instead of stdout
-#   pbcopy - to send login codes to the OSX clipboard instaed of stdout
+#   pbcopy - to send login codes to the OSX clipboard instead of stdout
 #   zbar - to parse QR codes from screen with -c option
-#   qrencode, imagemagick - to display QR codes with -v option
+#   qrencode - to display QR codes with -v option
+#   imagemagick, xv or xloadimage - to show -v QR codes in an X11 window
+#   gsettings - to warn if GNOME caches gpg passphrases indefinitely
 
 # Tip: If you need to retrieve seeds from an android phone, try
 # running the following command as root on your phone:
