@@ -15,7 +15,14 @@ somewhere on your path (e.g., `$HOME/bin/ga`).
 
 Requirements:
 
+* bash
 * gnupg
+
+`ga` is a self-contained bash script; the TOTP code calculation
+(base32 decoding and HMAC-SHA1) is implemented in bash itself, so no C
+compiler or OpenSSL is needed. If you used an older version of `ga`
+that compiled a helper program, you can delete the leftover
+`~/.config/ga/bin` directory.
 
 Optional dependencies:
 
