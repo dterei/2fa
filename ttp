@@ -54,31 +54,6 @@ usage() {
     exit 1
 }
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  export DISPLAY="<OSX>"
-fi
-
-case "$1" in
-    -x)
-        shift
-        unset DISPLAY
-        ;;
-    -x*)
-        unset DISPLAY
-        ;;
-esac
-test "$#" -ge 1 -a "$#" -le 2 || usage
-
-case $(gsettings get org.gnome.crypto.cache gpg-cache-method 2>/dev/null) in
-    "'idle'"|"'timeout'"|"")
-        ;;
-    *)
-        echo "WARNING:  gnome-keyring-daemon is not configured to forget passwords." >&2
-        echo "          It is strongly suggested that you run the following command:" >&2
-        echo "          gsettings set org.gnome.crypto.cache gpg-cache-method idle" >&2
-        ;;
-esac
-
 # Google authenticator code calculation in pure bash.  Bash integers
 # are 64 bits, which is enough to do SHA-1's 32-bit arithmetic.  Byte
 # strings are arrays of integers 0-255, passed in globals because bash
@@ -151,40 +126,86 @@ hmac_sha1() {
     sha1
 }
 
-# Read a base32 secret or otpauth://totp/ URI from stdin and print
-# the code for counter $1 (default: the current 30-second interval).
+
+# Read a base32 secret or otpauth://totp/ URI from stdin and print its
+# code for Unix time $1 (default: now).  URIs may set digits and period;
+# only SHA1, the default, is supported as the algorithm.
 totp() {
     local b32=ABCDEFGHIJKLMNOPQRSTUVWXYZ234567abcdefghijklmnopqrstuvwxyz
-    local ws=$' \t' line val now i p acc=0 bits=0
+    local ws=$' \t' line secret query param digits=6 period=30 algorithm=SHA1
+    local have_secret= now i p acc=0 bits=0
     if ! IFS= read -r line && test -z "$line"; then
         # If gpg or something fails on input.  But allow null key with \n.
         echo "$prog: aborted" >&2
         return 1
     fi
     case "$line" in
-        otpauth://totp/*'?secret='*)
-            line=${line#*'?secret='}
+        otpauth://totp/*'?'*)
+            query=${line#*'?'}
+            while test -n "$query"; do
+                param=${query%%&*}
+                case "$query" in
+                    *'&'*) query=${query#*&} ;;
+                    *) query= ;;
+                esac
+                case "$param" in
+                    secret=*) secret=${param#secret=} have_secret=1 ;;
+                    digits=*) digits=${param#digits=} ;;
+                    period=*) period=${param#period=} ;;
+                    algorithm=*) algorithm=${param#algorithm=} ;;
+                esac
+            done
+            if test -z "$have_secret"; then
+                echo "$prog: bad key" >&2
+                return 1
+            fi
             ;;
-        otpauth://totp/*'&secret='*)
-            line=${line#*'&secret='}
-            ;;
-        otpauth://totp/*)
+        otpauth://*)
             echo "$prog: bad key" >&2
             return 1
             ;;
+        *)
+            secret=$line
+            ;;
     esac
-    line=${line%%&*}
-    line=${line//[$ws]/}
 
-    case $(( ${#line} & 7 )) in
+    # These are checked as strings before any arithmetic, because bash
+    # arithmetic would evaluate expressions hidden in them.
+    case "$algorithm" in
+        SHA1|sha1) ;;
+        *)
+            echo "$prog: unsupported algorithm: $algorithm (only SHA1 is supported)" >&2
+            return 1
+            ;;
+    esac
+    case "$digits" in
+        [1-9]|10) ;;
+        *)
+            echo "$prog: unsupported number of digits: $digits" >&2
+            return 1
+            ;;
+    esac
+    case "$period" in
+        ''|0*|*[!0-9]*|??????????*)
+            echo "$prog: unsupported period: $period" >&2
+            return 1
+            ;;
+    esac
+
+    # Ignore whitespace and any trailing "=" padding.
+    secret=${secret//[$ws]/}
+    while test "${secret%=}" != "$secret"; do
+        secret=${secret%=}
+    done
+    case $(( ${#secret} & 7 )) in
         1|3|6)
             echo "$prog: bad key" >&2
             return 1
             ;;
     esac
     hmac_key=()
-    for ((i = 0; i < ${#line}; i++)); do
-        p=${b32%%"${line:i:1}"*}
+    for ((i = 0; i < ${#secret}; i++)); do
+        p=${b32%%"${secret:i:1}"*}
         if test ${#p} -eq ${#b32}; then
             echo "$prog: bad key" >&2
             return 1
@@ -197,37 +218,27 @@ totp() {
         fi
     done
 
-    if test -n "$1"; then
-        val=$(( $1 ))
-    else
-        now=${EPOCHSECONDS:-$(date +%s)}
-        val=$(( now / 30 ))
-    fi
+    now=${1:-${EPOCHSECONDS:-$(date +%s)}}
     hmac_msg=()
     for ((i = 56; i >= 0; i -= 8)); do
-        hmac_msg+=($(( val >> i & 255 )))
+        hmac_msg+=($(( now / period >> i & 255 )))
     done
 
     hmac_sha1
     i=$(( sha1_out[19] & 15 ))
-    printf '%06d\n' $(( ((sha1_out[i] & 127) << 24 | sha1_out[i+1] << 16
-                         | sha1_out[i+2] << 8 | sha1_out[i+3]) % 1000000 ))
+    printf "%0${digits}d\n" $(( ((sha1_out[i] & 127) << 24 | sha1_out[i+1] << 16
+                                | sha1_out[i+2] << 8 | sha1_out[i+3]) % 10 ** digits ))
 }
-if test "$#" -eq 1 -a x"$1" != x"-l"; then
-    mode=""
-    target="$1"
-else
-    mode="$1"
-    target="$2"
-fi
 
+# Pick an otpauth:// URI out of zbarimg output, asking which to use.
 gk() {
-    while read line; do
+    local line nosecret account ans
+    while IFS= read -r line; do
         nosecret="${line%%\?*}"
         account="${nosecret#QR-Code:otpauth://totp/}"
         if test x"$nosecret" != x"$account"; then
             echo -n "Use $account? (y) " > /dev/tty
-            read ans < /dev/tty
+            read -r ans < /dev/tty
             if test x"$ans" = x -o y = "$ans" -o yes = "$ans"; then
                 echo "${line#QR-Code:}"
                 return
@@ -236,10 +247,60 @@ gk() {
     done
 }
 
-case "$mode" in
-    "")
-        if code=$($gpgcmd $gpgoptions -d "$keydir/$target.gpg" \
-                         | totp); then
+# Exit with an error unless a key is stored for service $1.
+need_key() {
+    if ! test -f "$keydir/$1.gpg"; then
+        echo "$prog: no key for $1 (run '$prog -l' to list them)" >&2
+        exit 1
+    fi
+}
+
+main() {
+    local mode target code key secret f
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        export DISPLAY="<OSX>"
+    fi
+
+    case "$1" in
+        -x)
+            shift
+            unset DISPLAY
+            ;;
+        -x*)
+            unset DISPLAY
+            ;;
+    esac
+    case $# in
+        1)
+            case "$1" in
+                -l) mode=-l ;;
+                -*) usage ;;
+                *) mode= target=$1 ;;
+            esac
+            ;;
+        2)
+            mode=$1 target=$2
+            ;;
+        *)
+            usage
+            ;;
+    esac
+
+    case $(gsettings get org.gnome.crypto.cache gpg-cache-method 2>/dev/null) in
+        "'idle'"|"'timeout'"|"")
+            ;;
+        *)
+            echo "WARNING:  gnome-keyring-daemon is not configured to forget passwords." >&2
+            echo "          It is strongly suggested that you run the following command:" >&2
+            echo "          gsettings set org.gnome.crypto.cache gpg-cache-method idle" >&2
+            ;;
+    esac
+
+    case "$mode" in
+        "")
+            need_key "$target"
+            code=$($gpgcmd $gpgoptions -d "$keydir/$target.gpg" | totp) || exit 1
             if test -n "$DISPLAY" && command -v xclip > /dev/null; then
                 echo "Sending code to X clipboard"
                 echo -n "$code" | xclip -i
@@ -248,70 +309,71 @@ case "$mode" in
                 echo -n "$code" | xsel -i
             elif test -n "$DISPLAY" && command -v pbcopy > /dev/null; then
                 echo "Sending code to OSX clipboard"
-                printf "$code" | pbcopy
+                printf '%s' "$code" | pbcopy
             else
                 echo "$code"
             fi
-        else
-            exit 1
-        fi
-        ;;
-    -c|-xc)
-        umask 077
-        if test -f "$keydir/$target.gpg"; then
-            echo "$keydir/$target.gpg exists already; please delete it."
-            exit 1
-        fi
-        mkdir -p "$keydir"
-        unset key
-        if test -n "$DISPLAY"; then
-            key=$(zbarimg x:root 2> /dev/null | gk)
-        fi
-        if test -z "$key"; then
-            echo -n "Enter Base32-encoded authenticator key: "
-            read key
-            if test -z "$key"; then
-                echo "Aborted."
-                exit 0
+            ;;
+        -c|-xc)
+            umask 077
+            if test -e "$keydir/$target.gpg"; then
+                echo "$prog: $keydir/$target.gpg exists already; please delete it." >&2
+                exit 1
             fi
-        fi
-            echo "key is $key."
+            mkdir -p "$keydir" || exit 1
+            key=
+            if test -n "$DISPLAY"; then
+                key=$(zbarimg x:root 2> /dev/null | gk)
+            fi
+            if test -z "$key"; then
+                echo -n "Enter Base32-encoded authenticator key: "
+                IFS= read -r key
+                if test -z "$key"; then
+                    echo "Aborted."
+                    exit 0
+                fi
+            fi
+            printf '%s\n' "$key" | totp 0 > /dev/null || exit 1
+            printf '%s\n' "$key" \
+                | $gpgcmd $gpgoptions -c -o "$keydir/$target.gpg" || exit 1
+            ;;
+        -v|-xv)
+            need_key "$target"
+            secret=$($gpgcmd $gpgoptions -d "$keydir/$target.gpg") || exit 1
+            case "$secret" in
+                otpauth://totp/*)
+                    ;;
+                *)
+                    secret="otpauth://totp/$target?secret=$secret&issuer=$target"
+                    ;;
+            esac
+            secret=${secret// /}
+            if test -z "$DISPLAY"; then
+                printf '%s' "$secret" | qrencode -t ansi
+            elif command -v display > /dev/null; then
+                printf '%s' "$secret" | qrencode -o- | display -
+            elif command -v xv > /dev/null; then
+                printf '%s' "$secret" | qrencode -o- | xv -
+            elif command -v xloadimage > /dev/null; then
+                printf '%s' "$secret" | qrencode -o- | xloadimage stdin
+            else
+                printf '%s' "$secret" | qrencode -t ansi
+            fi
+            ;;
+        -l)
+            for f in "$keydir"/*.gpg; do
+                test -f "$f" || continue
+                f=${f##*/}
+                echo "${f%.gpg}"
+            done
+            ;;
+        *)
+            usage
+            ;;
+    esac
+}
 
-        echo "$key" | totp 0 || exit 1
-        echo "$key" | $gpgcmd $gpgoptions -c -o "$keydir/$2.gpg"
-        ;;
-    -v|-xv)
-        secret=$($gpgcmd $gpgoptions -d "$keydir/$target.gpg") || exit 1
-        case "$secret" in
-            otpauth://totp/*)
-                ;;
-            *)
-                secret="otpauth://totp/$target?secret=$secret&issuer=$target"
-                ;;
-        esac
-        secret=${secret// /}
-        if test -z "$DISPLAY"; then
-            printf '%s' "$secret" | qrencode -t ansi
-        elif command -v display > /dev/null; then
-            printf '%s' "$secret" | qrencode -o- | display -
-        elif command -v xv > /dev/null; then
-            printf '%s' "$secret" | qrencode -o- | xv -
-        elif command -v xloadimage > /dev/null; then
-            printf '%s' "$secret" | qrencode -o- | xloadimage stdin
-        else
-            printf '%s' "$secret" | qrencode -t ansi
-        fi
-        ;;
-    -l)
-        for f in "$keydir"/*.gpg; do
-            test -f "$f" || continue
-            f=${f##*/}
-            echo "${f%.gpg}"
-        done
-        ;;
-    *)
-        usage
-        ;;
-esac
-
-exit 0
+# Only run when executed, so the test suite can source this file.
+if test "${BASH_SOURCE[0]}" = "$0"; then
+    main "$@"
+fi

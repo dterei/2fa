@@ -59,6 +59,11 @@ Older versions of `ga` compiled a helper program into
 The `-x`, `-xc`, and `-xv` flags disable use of X11 even when
 `$DISPLAY` is set, compared to no option, `-c`, and `-v`.
 
+A key can be a base32 secret or an `otpauth://totp/` URI, such as the
+ones in QR codes. URIs may set `digits` (1 to 10) and `period`; `ttp`
+only supports the default SHA1 algorithm, and reports an error for any
+other.
+
 ## OS X and GPG Tools
 
 Mac OS X users may be using the [GPG Tools](https://gpgtools.org/)
@@ -86,6 +91,16 @@ Please report bugs via the
 Master [git repository](https://github.com/dterei/ttp):
 
 * `git clone https://github.com/dterei/ttp.git`
+
+### Running the tests
+
+    bash test/run-tests.sh
+
+The tests need only bash and gpg, and leave your keys alone: they use a
+temporary directory and their own GnuPG home. They run `ttp` with
+whichever bash runs the test script, so `/bin/bash test/run-tests.sh` on
+macOS tests the system's bash 3.2. GitHub Actions runs them on Linux and
+macOS for every pull request.
 
 ## Authors
 
