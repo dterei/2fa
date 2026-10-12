@@ -75,3 +75,8 @@ Master [git repository](https://github.com/dterei/2fa):
 ## Authors
 
 David Terei.
+
+## Acknowledgments
+
+`ttp` is a fork of [`ga`](https://github.com/scslab/ga), written by
+David Mazi&egrave;res.
