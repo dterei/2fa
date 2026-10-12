@@ -44,7 +44,7 @@ if ! test -d "$keydir" && test -d "$confdir/ga"; then
     keydir="$confdir/ga"
 fi
 gpgcmd="gpg"
-gpgoptions="--pinentry-mode loopback -q --no-mdc-warning"
+gpgoptions=(--pinentry-mode loopback -q --no-mdc-warning)
 
 usage() {
     echo "usage: $prog [-x] service     # get token for service" >&2
@@ -134,7 +134,7 @@ hmac_sha1() {
 totp() {
     local b32=ABCDEFGHIJKLMNOPQRSTUVWXYZ234567abcdefghijklmnopqrstuvwxyz
     local ws=$' \t' line secret query param digits=6 period=30 algorithm=SHA1
-    local have_secret= now i p acc=0 bits=0
+    local have_secret='' now i p acc=0 bits=0
     if ! IFS= read -r line && test -z "$line"; then
         # If gpg or something fails on input.  But allow null key with \n.
         echo "$prog: aborted" >&2
@@ -227,8 +227,10 @@ totp() {
 
     hmac_sha1
     i=$(( sha1_out[19] & 15 ))
-    printf "%0${digits}d\n" $(( ((sha1_out[i] & 127) << 24 | sha1_out[i+1] << 16
-                                | sha1_out[i+2] << 8 | sha1_out[i+3]) % 10 ** digits ))
+    # Keep this on one line: bash 4.0 reads "<<" in arithmetic that
+    # spans lines as the start of a here-document.
+    p=$(( (sha1_out[i] & 127) << 24 | sha1_out[i+1] << 16 | sha1_out[i+2] << 8 | sha1_out[i+3] ))
+    printf "%0${digits}d\n" $(( p % 10 ** digits ))
 }
 
 # Pick an otpauth:// URI out of zbarimg output, asking which to use.
@@ -277,7 +279,7 @@ main() {
             case "$1" in
                 -l) mode=-l ;;
                 -*) usage ;;
-                *) mode= target=$1 ;;
+                *) mode='' target=$1 ;;
             esac
             ;;
         2)
@@ -310,7 +312,7 @@ main() {
     case "$mode" in
         "")
             need_key "$target"
-            code=$($gpgcmd $gpgoptions -d "$keydir/$target.gpg" | totp) || exit 1
+            code=$("$gpgcmd" "${gpgoptions[@]}" -d "$keydir/$target.gpg" | totp) || exit 1
             if test -n "$WAYLAND_DISPLAY" && command -v wl-copy > /dev/null; then
                 echo "Sending code to Wayland clipboard"
                 printf '%s' "$code" | wl-copy
@@ -348,11 +350,11 @@ main() {
             fi
             printf '%s\n' "$key" | totp 0 > /dev/null || exit 1
             printf '%s\n' "$key" \
-                | $gpgcmd $gpgoptions -c -o "$keydir/$target.gpg" || exit 1
+                | "$gpgcmd" "${gpgoptions[@]}" -c -o "$keydir/$target.gpg" || exit 1
             ;;
         -v|-xv)
             need_key "$target"
-            secret=$($gpgcmd $gpgoptions -d "$keydir/$target.gpg") || exit 1
+            secret=$("$gpgcmd" "${gpgoptions[@]}" -d "$keydir/$target.gpg") || exit 1
             case "$secret" in
                 otpauth://totp/*)
                     ;;

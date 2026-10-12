@@ -9,6 +9,9 @@
 # a temporary directory is touched; gpg runs with its own GNUPGHOME and a
 # fixed passphrase.
 
+# The tests share globals such as sha1_in and sha1_out with ttp.
+# shellcheck disable=SC2034,SC2154
+
 export LC_ALL=C
 cd "$(dirname "$0")/.." || exit 1
 ttp=$PWD/ttp
@@ -64,6 +67,8 @@ hex() {
     printf '%02x' "$@"
 }
 
+b32chars=ABCDEFGHIJKLMNOPQRSTUVWXYZ234567
+
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/ttp-test.XXXXXX") || exit 1
 cleanup() {
     GNUPGHOME=$tmp/gnupg gpgconf --kill gpg-agent > /dev/null 2>&1
@@ -74,6 +79,7 @@ trap cleanup EXIT
 ########################################################################
 # Unit tests: source ttp and call its functions directly.
 
+# shellcheck source=/dev/null
 source "$ttp"
 
 echo "Testing sha1"
@@ -105,6 +111,7 @@ if test -n "$sha1tool"; then
             sha1_in+=($(( (i * 37 + len) & 255 )))
             escapes+=$(printf '\\%03o' $(( (i * 37 + len) & 255 )))
         done
+        # shellcheck disable=SC2059
         printf "$escapes" > "$tmp/blob"
         sha1
         want=$($sha1tool < "$tmp/blob")
@@ -162,7 +169,7 @@ for want in 755224 287082 359152 969429 338314 254676 287922 162583 399871 52048
     counter=$((counter + 1))
 done
 
-check "lowercase key" 287082 "$(echo "$key" | tr A-Z a-z | totp 30)"
+check "lowercase key" 287082 "$(echo "$key" | tr '[:upper:]' '[:lower:]' | totp 30)"
 check "key with spaces and tabs" 287082 "$(printf 'GEZD GNBV\tGY3T QOJQ GEZDGNBVGY3TQOJQ\n' | totp 30)"
 check "padded key" "$(echo MZXW6 | totp 30)" "$(echo 'MZXW6===' | totp 30)"
 check "URI with secret first" 287082 "$(echo "otpauth://totp/a:b?secret=$key&issuer=a" | totp 30)"
@@ -234,6 +241,8 @@ run() {
 run -xc demo <<< "$key"
 check "-xc: exit status" 0 "$rc"
 check "-xc: key file created" yes "$(test -f "$tmp/config/ttp/demo.gpg" && echo yes)"
+# ls is the portable way to read permissions; stat differs across systems.
+# shellcheck disable=SC2012
 check "-xc: key file is private" "-rw-------" "$(ls -l "$tmp/config/ttp/demo.gpg" | cut -c1-10)"
 
 run -l
@@ -341,6 +350,82 @@ out=$(env PATH="$tmp/clipbin:$PATH" WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 "$BASH"
 check "-x with Wayland and X11: prints the code" 6 "${#out}"
 check "-x with Wayland and X11: no clipboard" no "$(test -e "$tmp/clip" && echo yes || echo no)"
 
+# pbcopy is used last, so only test it when no real xclip or xsel is
+# installed to take precedence.
+if ! command -v xclip > /dev/null && ! command -v xsel > /dev/null; then
+    mkdir -p "$tmp/macbin"
+    cat > "$tmp/macbin/pbcopy" <<EOF
+#!/bin/sh
+echo "pbcopy \$*" > "$tmp/clip"
+cat >> "$tmp/clip"
+EOF
+    chmod +x "$tmp/macbin/pbcopy"
+    rm -f "$tmp/clip"
+    out=$(env PATH="$tmp/macbin:$PATH" DISPLAY=:0 "$BASH" "$ttp" demo 2>&1)
+    check "pbcopy: message" "Sending code to OSX clipboard" "$out"
+    check "pbcopy: copies a code" 6 "$(sed -n 2p "$tmp/clip" | tr -d '\n' | wc -c | tr -d ' ')"
+fi
+
+# QR code viewers, in order of preference.  qrencode -o- would write a
+# PNG; the stand-in writes the URI, and each viewer records what it got.
+mkdir -p "$tmp/viewbin"
+for viewer in display xv xloadimage; do
+    cat > "$tmp/viewbin/$viewer" <<EOF
+#!/bin/sh
+echo "$viewer \$*" > "$tmp/view"
+cat >> "$tmp/view"
+EOF
+    chmod +x "$tmp/viewbin/$viewer"
+done
+# A real viewer later in the order would take over once a stand-in is
+# removed, so only test the fallbacks when none is installed.
+if command -v display xv xloadimage > /dev/null; then
+    viewers=display
+else
+    viewers="display xv xloadimage"
+fi
+for viewer in $viewers; do
+    rm -f "$tmp/view"
+    out=$(env PATH="$tmp/viewbin:$PATH" DISPLAY=:0 "$BASH" "$ttp" -v demo 2>&1)
+    case $viewer in
+        xloadimage) want="xloadimage stdin" ;;
+        *) want="$viewer -" ;;
+    esac
+    check "-v with $viewer: viewer and arguments" "$want" "$(sed -n 1p "$tmp/view" 2>/dev/null)"
+    check "-v with $viewer: URI" "otpauth://totp/demo?secret=$key&issuer=demo" "$(sed -n 2p "$tmp/view" 2>/dev/null)"
+    rm "$tmp/viewbin/$viewer"
+done
+if test "$viewers" != display; then
+    out=$(env PATH="$tmp/viewbin:$PATH" DISPLAY=:0 "$BASH" "$ttp" -v demo 2>&1)
+    check "-v with no viewer: drawn in the terminal" "otpauth://totp/demo?secret=$key&issuer=demo" "$out"
+else
+    echo "  (a QR code viewer is installed; skipping the viewer fallback tests)"
+fi
+
+# The GNOME keyring warning.
+mkdir -p "$tmp/gnomebin"
+for method in idle session; do
+    printf '#!/bin/sh\necho "'"'"'%s'"'"'"\n' "$method" > "$tmp/gnomebin/gsettings"
+    chmod +x "$tmp/gnomebin/gsettings"
+    out=$(env PATH="$tmp/gnomebin:$PATH" "$BASH" "$ttp" -l 2>&1)
+    case $method in
+        idle) check "gsettings idle: no warning" demo "$out" ;;
+        *) check_contains "gsettings $method: warning" "WARNING:  gnome-keyring-daemon" "$out" ;;
+    esac
+done
+
+# A wrong passphrase gives an error, not a code.
+cat > "$tmp/failbin/gpg" <<EOF
+#!/bin/sh
+exec "$real_gpg" --batch --passphrase wrong-passphrase "\$@"
+EOF
+out=$(PATH="$tmp/failbin:$PATH" "$BASH" "$ttp" -x demo 2>&1)
+rc=$?
+check "wrong passphrase: exit status" 1 "$rc"
+case "$out" in
+    *[0-9][0-9][0-9][0-9][0-9][0-9]*) fail "wrong passphrase: printed something like a code" "$out" ;;
+esac
+
 uri="otpauth://totp/Example%3Aalice%40example.com?secret=$key&issuer=Example&digits=8"
 run -xc eight <<< "$uri"
 check "-xc with URI: exit status" 0 "$rc"
@@ -362,6 +447,32 @@ out=$(XDG_CONFIG_HOME=$tmp/legacy "$BASH" "$ttp" -x old 2>&1)
 after=$(echo "$key" | totp)
 check "legacy ~/.config/ga: -x" yes \
     "$(test "$out" = "$before" -o "$out" = "$after" && echo yes || echo "no ($out)")"
+
+########################################################################
+# Cross-check against oathtool, an independent TOTP implementation, when
+# it is installed.
+
+if command -v oathtool > /dev/null; then
+    echo "Comparing with oathtool"
+    for ((n = 0; n < 50; n++)); do
+        len=$(( (RANDOM % 8 + 1) * 8 ))
+        secret=
+        for ((i = 0; i < len; i++)); do
+            secret+=${b32chars:RANDOM % 32:1}
+        done
+        time=$(( RANDOM * RANDOM ))
+        case $(( n % 3 )) in
+            0) digits=6 period=30 ;;
+            1) digits=8 period=30 ;;
+            2) digits=6 period=60 ;;
+        esac
+        want=$(oathtool --totp -b -d "$digits" -s "${period}s" -N "@$time" "$secret")
+        got=$(echo "otpauth://totp/x?secret=$secret&digits=$digits&period=$period" | totp "$time")
+        check "oathtool: $secret, digits=$digits, period=$period, time=$time" "$want" "$got"
+    done
+else
+    echo "  (oathtool not found; skipping comparison)"
+fi
 
 ########################################################################
 
