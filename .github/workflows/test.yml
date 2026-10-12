@@ -1,0 +1,22 @@
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # /bin/bash is bash 5 on Ubuntu and bash 3.2 on macOS.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GnuPG
+        if: runner.os == 'macOS'
+        run: command -v gpg || brew install gnupg
+      - name: Run tests
+        run: /bin/bash test/run-tests.sh

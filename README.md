@@ -92,6 +92,16 @@ Master [git repository](https://github.com/dterei/ttp):
 
 * `git clone https://github.com/dterei/ttp.git`
 
+### Running the tests
+
+    bash test/run-tests.sh
+
+The tests need only bash and gpg, and leave your keys alone: they use a
+temporary directory and their own GnuPG home. They run `ttp` with
+whichever bash runs the test script, so `/bin/bash test/run-tests.sh` on
+macOS tests the system's bash 3.2. GitHub Actions runs them on Linux and
+macOS for every pull request.
+
 ## Authors
 
 David Terei.
