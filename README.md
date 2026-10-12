@@ -62,6 +62,18 @@ ones in QR codes. URIs may set `digits` (1 to 10) and `period`; `ttp`
 only supports the default SHA1 algorithm, and reports an error for any
 other.
 
+### Importing from Google Authenticator
+
+In Google Authenticator, choose "Transfer accounts", then "Export
+accounts". The app shows one or more QR codes, each holding several
+accounts. Then, for each account you want to move, run `ttp -c`
+_service_ with the QR code on screen (this needs X11 and `zbarimg`),
+and answer `y` when `ttp` asks about that account. If you have the
+code's `otpauth-migration://` URI instead, paste it at the key prompt.
+
+Counter-based (HOTP) accounts are skipped, and accounts using an
+algorithm other than SHA1 are rejected.
+
 ## OS X and GPG Tools
 
 Mac OS X users may be using the [GPG Tools](https://gpgtools.org/)

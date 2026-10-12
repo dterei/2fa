@@ -28,12 +28,10 @@
 #   imagemagick, xv or xloadimage - to show -v QR codes in an X11 window
 #   gsettings - to warn if GNOME caches gpg passphrases indefinitely
 
-# Tip: If you need to retrieve seeds from an android phone, try
-# running the following command as root on your phone:
-#
-# sqlite3 -header \
-#   /data/data/com.google.android.apps.authenticator2/databases/databases \
-#   'SELECT email, secret FROM accounts;'
+# Tip: To move keys from Google Authenticator, use its "Transfer
+# accounts" > "Export accounts" option, then run "ttp -c service" with
+# the export QR code on screen, or paste its otpauth-migration:// URI
+# at the key prompt.  Repeat for each account you want.
 
 
 prog=${0##*/}
@@ -230,21 +228,227 @@ totp() {
     printf "%0${digits}d\n" $(( p % 10 ** digits ))
 }
 
-# Pick an otpauth:// URI out of zbarimg output, asking which to use.
-gk() {
-    local line nosecret account ans
-    # Stdin is zbarimg's output and stdout is captured, so ask on stderr
-    # and read the answers from the terminal.
-    while IFS= read -r line; do
-        nosecret="${line%%\?*}"
-        account="${nosecret#QR-Code:otpauth://totp/}"
-        if test x"$nosecret" != x"$account"; then
-            echo -n "Use $account? (y) " >&2
-            read -r ans <&3
-            if test x"$ans" = x -o y = "$ans" -o yes = "$ans"; then
-                echo "${line#QR-Code:}"
-                return
+# Print bytes $@ as base32, without padding.
+base32_encode() {
+    local alphabet=ABCDEFGHIJKLMNOPQRSTUVWXYZ234567 out='' acc=0 bits=0 b
+    for b in "$@"; do
+        acc=$(( acc << 8 | b )) bits=$(( bits + 8 ))
+        while ((bits >= 5)); do
+            bits=$(( bits - 5 ))
+            out+=${alphabet:$(( acc >> bits & 31 )):1}
+        done
+        acc=$(( acc & ((1 << bits) - 1) ))
+    done
+    if ((bits > 0)); then
+        out+=${alphabet:$(( acc << (5 - bits) & 31 )):1}
+    fi
+    echo "$out"
+}
+
+# Print bytes $@ percent-encoded for use in a URI, keeping letters,
+# digits and -._~:@ as they are.
+uri_encode() {
+    local out='' b c
+    for b in "$@"; do
+        if (( (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+              || b == 45 || b == 46 || b == 95 || b == 126 || b == 58 || b == 64 )); then
+            # Format the byte as an octal escape, without a subshell.
+            # shellcheck disable=SC2059
+            printf -v c "\\$(( b >> 6 ))$(( b >> 3 & 7 ))$(( b & 7 ))"
+            out+=$c
+        else
+            printf -v c '%%%02X' "$b"
+            out+=$c
+        fi
+    done
+    echo "$out"
+}
+
+# Protobuf helpers for migration_uris.  They read the array pb from
+# position pos up to end, all variables of the caller.
+
+# Read a varint into v.
+pb_varint() {
+    local b shift=0
+    v=0
+    while ((pos < end)); do
+        b=${pb[pos]} pos=$(( pos + 1 ))
+        v=$(( v | (b & 127) << shift ))
+        if ((b < 128)); then
+            return 0
+        fi
+        shift=$(( shift + 7 ))
+        if ((shift > 63)); then
+            return 1
+        fi
+    done
+    return 1
+}
+
+# Skip a field of wire type $1.
+pb_skip() {
+    case $1 in
+        0) pb_varint || return 1 ;;
+        1) pos=$(( pos + 8 )) ;;
+        2) pb_varint || return 1; pos=$(( pos + v )) ;;
+        5) pos=$(( pos + 4 )) ;;
+        *) return 1 ;;
+    esac
+    ((pos <= end))
+}
+
+# Read a length-delimited field's bytes into the array field.
+pb_bytes() {
+    pb_varint || return 1
+    if ((v > end - pos)); then
+        return 1
+    fi
+    field=("${pb[@]:pos:v}")
+    pos=$(( pos + v ))
+}
+
+# Print one otpauth://totp/ URI for the OtpParameters message that ends
+# at $1, starting at pos.
+migration_account() {
+    local end=$1 key v type=0 algorithm=0 digits=0 label issuer uri
+    local -a field secret name issuer_bytes
+    while ((pos < end)); do
+        pb_varint || return 1
+        key=$v
+        case $key in
+            10) pb_bytes || return 1; secret=("${field[@]}") ;;
+            18) pb_bytes || return 1; name=("${field[@]}") ;;
+            26) pb_bytes || return 1; issuer_bytes=("${field[@]}") ;;
+            32) pb_varint || return 1; algorithm=$v ;;
+            40) pb_varint || return 1; digits=$v ;;
+            48) pb_varint || return 1; type=$v ;;
+            *) pb_skip $(( key & 7 )) || return 1 ;;
+        esac
+    done
+
+    label=$(uri_encode "${name[@]}")
+    issuer=$(uri_encode "${issuer_bytes[@]}")
+    if test "$type" = 1; then
+        echo "$prog: skipping $label: counter-based (HOTP) keys are not supported" >&2
+        return 0
+    fi
+    if test -n "$issuer"; then
+        case "$label" in
+            "$issuer":*) ;;
+            *) label="$issuer:$label" ;;
+        esac
+    fi
+    uri="otpauth://totp/$label?secret=$(base32_encode "${secret[@]}")"
+    if test -n "$issuer"; then
+        uri+="&issuer=$issuer"
+    fi
+    case $algorithm in
+        0|1) ;;
+        2) uri+="&algorithm=SHA256" ;;
+        3) uri+="&algorithm=SHA512" ;;
+        4) uri+="&algorithm=MD5" ;;
+        *) uri+="&algorithm=unknown" ;;
+    esac
+    if test "$digits" = 2; then
+        uri+="&digits=8"
+    fi
+    echo "$uri"
+}
+
+# Print an otpauth://totp/ URI for each TOTP key in a Google
+# Authenticator export, otpauth-migration://offline?data=..., where data
+# is a base64 MigrationPayload protobuf.
+migration_uris() {
+    local b64=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/
+    local query param data='' i c p acc=0 bits=0 pos=0 end v key
+    local -a pb
+    query=${1#*'?'}
+    while test -n "$query"; do
+        param=${query%%&*}
+        case "$query" in
+            *'&'*) query=${query#*&} ;;
+            *) query= ;;
+        esac
+        case "$param" in
+            data=*) data=${param#data=} ;;
+        esac
+    done
+    # Undo the URI encoding of the base64 characters + / and =.
+    data=${data//%2B/+} data=${data//%2b/+}
+    data=${data//%2F//} data=${data//%2f//}
+    data=${data//%3D/=} data=${data//%3d/=}
+    while test "${data%=}" != "$data"; do
+        data=${data%=}
+    done
+    for ((i = 0; i < ${#data}; i++)); do
+        c=${data:i:1}
+        case "$c" in
+            -) p=62 ;;
+            _) p=63 ;;
+            *)
+                p=${b64%%"$c"*}
+                p=${#p}
+                if ((p == 64)); then
+                    echo "$prog: bad Google Authenticator export" >&2
+                    return 1
+                fi
+                ;;
+        esac
+        acc=$(( acc << 6 | p )) bits=$(( bits + 6 ))
+        if ((bits >= 8)); then
+            bits=$(( bits - 8 ))
+            pb+=($(( acc >> bits & 255 )))
+            acc=$(( acc & ((1 << bits) - 1) ))
+        fi
+    done
+
+    # MigrationPayload: field 1 holds each key's OtpParameters.
+    end=${#pb[@]}
+    while ((pos < end)); do
+        if ! pb_varint; then
+            echo "$prog: bad Google Authenticator export" >&2
+            return 1
+        fi
+        key=$v
+        if test "$key" = 10; then
+            if ! pb_varint || ((v > end - pos)) \
+                    || ! migration_account $(( pos + v )); then
+                echo "$prog: bad Google Authenticator export" >&2
+                return 1
             fi
+        elif ! pb_skip $(( key & 7 )); then
+            echo "$prog: bad Google Authenticator export" >&2
+            return 1
+        fi
+    done
+}
+
+# Turn zbarimg output ("QR-Code:" lines) or pasted URIs into one
+# otpauth://totp/ URI per line, expanding Google Authenticator exports.
+qr_uris() {
+    local line
+    while IFS= read -r line; do
+        line=${line#QR-Code:}
+        case "$line" in
+            otpauth://totp/*) echo "$line" ;;
+            otpauth-migration://*) migration_uris "$line" ;;
+        esac
+    done
+}
+
+# Pick one of the URIs on stdin, asking which to use.
+gk() {
+    local uri account ans
+    # Stdin is a pipe and stdout is captured, so ask on stderr and read
+    # the answers from the terminal.
+    while IFS= read -r uri; do
+        account=${uri#otpauth://totp/}
+        account=${account%%\?*}
+        echo -n "Use $account? (y) " >&2
+        read -r ans <&3
+        if test x"$ans" = x -o y = "$ans" -o yes = "$ans"; then
+            echo "$uri"
+            return
         fi
     done 3< "$ttydev"
 }
@@ -337,11 +541,16 @@ main() {
             mkdir -p "$keydir" || exit 1
             key=
             if test -n "$DISPLAY"; then
-                key=$(zbarimg x:root 2> /dev/null | gk)
+                key=$(zbarimg x:root 2> /dev/null | qr_uris | gk)
             fi
             if test -z "$key"; then
                 echo -n "Enter Base32-encoded authenticator key: "
                 IFS= read -r key
+                case "$key" in
+                    otpauth-migration://*)
+                        key=$(printf '%s\n' "$key" | qr_uris | gk)
+                        ;;
+                esac
                 if test -z "$key"; then
                     echo "Aborted."
                     exit 0
