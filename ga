@@ -33,7 +33,7 @@
 #   'SELECT email, secret FROM accounts;'
 
 
-prog=$(basename $0)
+prog=${0##*/}
 keydir="${XDG_CONFIG_HOME-${HOME}/.config}/ga"
 gpgcmd="gpg"
 gpgoptions="--pinentry-mode loopback -q --no-mdc-warning"
@@ -66,11 +66,9 @@ case $(gsettings get org.gnome.crypto.cache gpg-cache-method 2>/dev/null) in
     "'idle'"|"'timeout'"|"")
         ;;
     *)
-        cat >&2 <<EOF
-WARNING:  gnome-keyring-daemon is not configured to forget passwords.
-          It is strongly suggested that you run the following command:
-          gsettings set org.gnome.crypto.cache gpg-cache-method idle
-EOF
+        echo "WARNING:  gnome-keyring-daemon is not configured to forget passwords." >&2
+        echo "          It is strongly suggested that you run the following command:" >&2
+        echo "          gsettings set org.gnome.crypto.cache gpg-cache-method idle" >&2
         ;;
 esac
 
@@ -284,20 +282,25 @@ case "$mode" in
                 secret="otpauth://totp/$target?secret=$secret&issuer=$target"
                 ;;
         esac
+        secret=${secret// /}
         if test -z "$DISPLAY"; then
-            printf "$secret" | tr -d ' ' | qrencode -t ansi
+            printf '%s' "$secret" | qrencode -t ansi
         elif command -v display > /dev/null; then
-            printf "$secret" | tr -d ' ' | qrencode -o- | display -
+            printf '%s' "$secret" | qrencode -o- | display -
         elif command -v xv > /dev/null; then
-            printf "$secret" | tr -d ' ' | qrencode -o- | xv -
+            printf '%s' "$secret" | qrencode -o- | xv -
         elif command -v xloadimage > /dev/null; then
-            printf "$secret" | tr -d ' ' | qrencode -o- | xloadimage stdin
+            printf '%s' "$secret" | qrencode -o- | xloadimage stdin
         else
-            printf "$secret" | tr -d ' ' | qrencode -t ansi
+            printf '%s' "$secret" | qrencode -t ansi
         fi
         ;;
     -l)
-        ls "$keydir/" | sed -ne "s/.gpg$//p"
+        for f in "$keydir"/*.gpg; do
+            test -f "$f" || continue
+            f=${f##*/}
+            echo "${f%.gpg}"
+        done
         ;;
     *)
         usage
