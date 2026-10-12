@@ -14,8 +14,7 @@ Just download and install
 somewhere on your path (e.g., `$HOME/bin/ttp`).
 
 `ttp` is a self-contained bash script; the TOTP code calculation
-(base32 decoding and HMAC-SHA1) is implemented in bash itself, so no C
-compiler or OpenSSL is needed.
+(base32 decoding and HMAC-SHA1) is implemented in bash itself.
 
 ### Required dependencies
 
@@ -41,14 +40,6 @@ compiler or OpenSSL is needed.
 | [`qrencode`](https://fukuchi.org/works/qrencode/) | `-v`: showing a key as a QR code. | `-v` doesn't work. |
 | `display` (from [ImageMagick](https://imagemagick.org/)), `xv` or `xloadimage` | `-v`: showing the QR code in a window (X11 only). | The QR code is drawn in the terminal. |
 | `gsettings` (GNOME) | Warning you if GNOME is set to cache your GPG passphrase indefinitely. | The check is skipped. |
-
-### Upgrading from `ga`
-
-`ttp` used to be called `ga`. It stores keys in `~/.config/ttp`, but
-if that doesn't exist and `~/.config/ga` does, it keeps using
-`~/.config/ga`. To switch over, run `mv ~/.config/ga ~/.config/ttp`.
-Older versions of `ga` compiled a helper program into
-`~/.config/ga/bin`; you can delete that directory.
 
 ## Using
 

@@ -499,17 +499,6 @@ check "-xv with URI: prints URI unchanged" "$uri" "$out"
 run -xv demo
 check "-xv with plain key: builds URI" "otpauth://totp/demo?secret=$key&issuer=demo" "$out"
 
-# Keys left in ~/.config/ga by older versions are still found.
-mkdir -p "$tmp/legacy/ga"
-cp "$tmp/config/ttp/demo.gpg" "$tmp/legacy/ga/old.gpg"
-out=$(XDG_CONFIG_HOME=$tmp/legacy "$BASH" "$ttp" -l 2>&1)
-check "legacy ~/.config/ga: -l" old "$out"
-before=$(echo "$key" | totp)
-out=$(XDG_CONFIG_HOME=$tmp/legacy "$BASH" "$ttp" -x old 2>&1)
-after=$(echo "$key" | totp)
-check "legacy ~/.config/ga: -x" yes \
-    "$(test "$out" = "$before" -o "$out" = "$after" && echo yes || echo "no ($out)")"
-
 ########################################################################
 # Cross-check against oathtool, an independent TOTP implementation, when
 # it is installed.

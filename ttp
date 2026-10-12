@@ -37,12 +37,7 @@
 
 
 prog=${0##*/}
-confdir="${XDG_CONFIG_HOME-${HOME}/.config}"
-keydir="$confdir/ttp"
-# ttp was called ga, so keep using its keys if they haven't been moved.
-if ! test -d "$keydir" && test -d "$confdir/ga"; then
-    keydir="$confdir/ga"
-fi
+keydir="${XDG_CONFIG_HOME-${HOME}/.config}/ttp"
 gpgcmd="gpg"
 # Where gk reads answers from; the tests point it at a file.
 ttydev=/dev/tty
