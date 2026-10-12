@@ -207,6 +207,31 @@ for param in digits period; do
     check "code in $param is not run" no "$(test -e "$tmp/pwned" && echo yes || echo no)"
 done
 
+echo "Testing gk (choosing a QR code from zbarimg output)"
+qr_a="otpauth://totp/A:alice?secret=$key&issuer=A"
+qr_b="otpauth://totp/B:bob?secret=MZXW6YTBOI&issuer=B"
+qr_lines=$(printf 'QR-Code:https://example.com\nQR-Code:%s\nQR-Code:%s\n' "$qr_a" "$qr_b")
+
+# choose ANSWERS: run gk on $qr_lines, answering its questions with
+# ANSWERS (with \n escapes), setting $chosen and $prompts.
+choose() {
+    printf '%b' "$1" > "$tmp/answers"
+    chosen=$(ttydev=$tmp/answers gk <<< "$qr_lines" 2> "$tmp/prompts")
+    prompts=$(cat "$tmp/prompts")
+}
+choose '\n'
+check "gk: empty answer picks the first code" "$qr_a" "$chosen"
+check "gk: asks only about TOTP codes" "Use A:alice? (y) " "$prompts"
+choose 'y\n'
+check "gk: y picks the first code" "$qr_a" "$chosen"
+choose 'yes\n'
+check "gk: yes picks the first code" "$qr_a" "$chosen"
+choose 'n\ny\n'
+check "gk: n then y picks the second code" "$qr_b" "$chosen"
+check "gk: asks about each code in turn" "Use A:alice? (y) Use B:bob? (y) " "$prompts"
+choose 'n\nn\n'
+check "gk: declining every code picks none" "" "$chosen"
+
 ########################################################################
 # Command-line tests: run ttp as a program, with gpg wrapped to use a
 # fixed passphrase and no prompts.
@@ -307,6 +332,43 @@ check "-xc name with a space: exit status" 0 "$rc"
 run -x "my bank"
 check "-x name with a space: exit status" 0 "$rc"
 rm -f "$tmp/config/ttp/my bank.gpg"
+
+# -c reading a QR code from the screen.  ttp's functions were sourced
+# above, so call main directly, in a subshell, with a stand-in zbarimg
+# that "sees" $tmp/screen, and with keydir pointed at the test's key
+# directory.
+cat > "$tmp/bin/zbarimg" <<EOF
+#!/bin/sh
+cat "$tmp/screen"
+EOF
+chmod +x "$tmp/bin/zbarimg"
+
+# scan NAME ANSWERS: run "ttp -c NAME" with ANSWERS (with \n escapes)
+# as the terminal input, setting $out and $rc.
+scan() {
+    printf '%b' "$2" > "$tmp/answers"
+    out=$(keydir=$tmp/config/ttp ttydev=$tmp/answers DISPLAY=:0 main -c "$1" 2>&1)
+    rc=$?
+}
+
+printf '%s\n' "$qr_lines" > "$tmp/screen"
+scan scanned 'n\ny\n' < /dev/null
+check "-c from screen: exit status" 0 "$rc"
+check_contains "-c from screen: asks which code" "Use B:bob? (y)" "$out"
+run -xv scanned
+check "-c from screen: stores the chosen URI" "$qr_b" "$out"
+
+scan declined 'n\nn\n' < /dev/null
+check "-c declining every code: exit status" 0 "$rc"
+check_contains "-c declining every code: asks for a key" "Enter Base32-encoded authenticator key" "$out"
+check "-c declining every code: no file" no "$(test -e "$tmp/config/ttp/declined.gpg" && echo yes || echo no)"
+
+: > "$tmp/screen"
+scan typed '' <<< "$key"
+check "-c with no QR code: exit status" 0 "$rc"
+run -xv typed
+check "-c with no QR code: stores the typed key" "otpauth://totp/typed?secret=$key&issuer=typed" "$out"
+rm -f "$tmp/bin/zbarimg" "$tmp/config/ttp/scanned.gpg" "$tmp/config/ttp/typed.gpg"
 
 # Clipboard tools.  Each stand-in records its arguments and input.
 mkdir -p "$tmp/clipbin"
