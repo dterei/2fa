@@ -66,12 +66,12 @@ We are happy to receive bug reports, fixes, documentation enhancements,
 and other improvements.
 
 Please report bugs via the
-[github issue tracker](http://github.com/scslab/ga/issues).
+[github issue tracker](https://github.com/dterei/2fa/issues).
 
-Master [git repository](http://github.com/scslab/ga):
+Master [git repository](https://github.com/dterei/2fa):
 
-* `git clone git://github.com/scslab/ga.git`
+* `git clone https://github.com/dterei/2fa.git`
 
 ## Authors
 
-David Mazi&egrave;res.
+David Terei.
