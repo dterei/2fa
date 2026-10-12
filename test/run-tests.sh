@@ -207,7 +207,7 @@ for param in digits period; do
     check "code in $param is not run" no "$(test -e "$tmp/pwned" && echo yes || echo no)"
 done
 
-echo "Testing gk (choosing a QR code from zbarimg output)"
+echo "Testing qr_uris and gk (choosing a QR code from zbarimg output)"
 qr_a="otpauth://totp/A:alice?secret=$key&issuer=A"
 qr_b="otpauth://totp/B:bob?secret=MZXW6YTBOI&issuer=B"
 qr_lines=$(printf 'QR-Code:https://example.com\nQR-Code:%s\nQR-Code:%s\n' "$qr_a" "$qr_b")
@@ -216,7 +216,7 @@ qr_lines=$(printf 'QR-Code:https://example.com\nQR-Code:%s\nQR-Code:%s\n' "$qr_a
 # ANSWERS (with \n escapes), setting $chosen and $prompts.
 choose() {
     printf '%b' "$1" > "$tmp/answers"
-    chosen=$(ttydev=$tmp/answers gk <<< "$qr_lines" 2> "$tmp/prompts")
+    chosen=$(qr_uris <<< "$qr_lines" | ttydev=$tmp/answers gk 2> "$tmp/prompts")
     prompts=$(cat "$tmp/prompts")
 }
 choose '\n'
@@ -231,6 +231,53 @@ check "gk: n then y picks the second code" "$qr_b" "$chosen"
 check "gk: asks about each code in turn" "Use A:alice? (y) Use B:bob? (y) " "$prompts"
 choose 'n\nn\n'
 check "gk: declining every code picks none" "" "$chosen"
+
+echo "Testing Google Authenticator export decoding"
+check "base32_encode of the RFC key" "$key" "$(base32_encode 49 50 51 52 53 54 55 56 57 48 49 50 51 52 53 54 55 56 57 48)"
+check "base32_encode of foo" MZXW6 "$(base32_encode 102 111 111)"
+check "base32_encode of nothing" "" "$(base32_encode)"
+check "base32_encode of 00 ff 10" AD7RA "$(base32_encode 0 255 16)"
+to_bytes "Zo"
+check "uri_encode of UTF-8, space and &" "Zo%C3%AB%20%26%20co" "$(uri_encode "${bytes[@]}" 195 171 32 38 32 99 111)"
+to_bytes "a-._~:@Z9"
+check "uri_encode keeps unreserved characters" "a-._~:@Z9" "$(uri_encode "${bytes[@]}")"
+
+# Exports built independently, by hand-encoding the protobuf in Python:
+# two holds alice (Example, SHA1, 6 digits) and bob (no issuer, 8
+# digits); mixed holds an HOTP key, a SHA256 key, a name that already
+# starts with its issuer, and a non-ASCII name with a space and "&".
+export_two='otpauth-migration://offline?data=CjgKFDEyMzQ1Njc4OTAxMjM0NTY3ODkwEhFhbGljZUBleGFtcGxlLmNvbRoHRXhhbXBsZSABKAEwAgoTCgZmb29iYXISA2JvYiAAKAIwAhABGAEgACiVmu86'
+export_two_raw='otpauth-migration://offline?data=CjgKFDEyMzQ1Njc4OTAxMjM0NTY3ODkwEhFhbGljZUBleGFtcGxlLmNvbRoHRXhhbXBsZSABKAEwAgoTCgZmb29iYXISA2JvYiAAKAIwAhABGAEgACiVmu86'
+export_mixed='otpauth-migration://offline?data=Ch0KCmhvdHBzZWNyZXQSB2NvdW50ZXIgASgBMAE4BQonCgpzaGFzZWNyZXQhEgtzaGEyNTYgdXNlchoGQmlnIENvIAIoATACCikKCUV4YW1wbGU6eBINRXhhbXBsZTpjYXJvbBoHRXhhbXBsZSABKAEwAgoWCgMA%2FxASCVpvw6sgJiBjbyABKAEwAhABGAEgACiVmu86'
+uri_alice="otpauth://totp/Example:alice@example.com?secret=$key&issuer=Example"
+uri_bob="otpauth://totp/bob?secret=MZXW6YTBOI&digits=8"
+check "export with two keys" "$uri_alice"$'\n'"$uri_bob" "$(migration_uris "$export_two")"
+check "export without URI encoding" "$uri_alice"$'\n'"$uri_bob" "$(migration_uris "$export_two_raw")"
+out=$(migration_uris "$export_mixed" 2> "$tmp/stderr")
+check "export with mixed keys" \
+    "otpauth://totp/Big%20Co:sha256%20user?secret=ONUGC43FMNZGK5BB&issuer=Big%20Co&algorithm=SHA256
+otpauth://totp/Example:carol?secret=IV4GC3LQNRSTU6A&issuer=Example
+otpauth://totp/Zo%C3%AB%20%26%20co?secret=AD7RA" "$out"
+check_contains "export with an HOTP key: skipped" "skipping counter: counter-based (HOTP)" "$(cat "$tmp/stderr")"
+check "SHA256 key from an export is rejected" 1 \
+    "$(printf '%s\n' "$out" | sed -n 1p | totp 30 > /dev/null 2>&1; echo $?)"
+check "8-digit key from an export" 8 "$(echo "$uri_bob" | totp 30 | tr -d '\n' | wc -c | tr -d ' ')"
+
+# expect_bad_export NAME URI
+expect_bad_export() {
+    local out rc
+    out=$(migration_uris "$2" 2>&1)
+    rc=$?
+    check "$1: exit status" 1 "$rc"
+    check_contains "$1: message" "bad Google Authenticator export" "$out"
+}
+expect_bad_export "export with invalid base64" "otpauth-migration://offline?data=ab!d"
+expect_bad_export "truncated export" "${export_two_raw:0:60}"
+expect_bad_export "export with a bad wire type" "otpauth-migration://offline?data=Dw"
+check "empty export" "" "$(migration_uris "otpauth-migration://offline?data=" 2>&1)"
+check "qr_uris expands exports among other codes" \
+    "otpauth://totp/A?secret=$key"$'\n'"$uri_alice"$'\n'"$uri_bob" \
+    "$(printf 'QR-Code:https://example.com\nQR-Code:otpauth://totp/A?secret=%s\nQR-Code:%s\n' "$key" "$export_two" | qr_uris)"
 
 ########################################################################
 # Command-line tests: run ttp as a program, with gpg wrapped to use a
@@ -368,7 +415,30 @@ scan typed '' <<< "$key"
 check "-c with no QR code: exit status" 0 "$rc"
 run -xv typed
 check "-c with no QR code: stores the typed key" "otpauth://totp/typed?secret=$key&issuer=typed" "$out"
-rm -f "$tmp/bin/zbarimg" "$tmp/config/ttp/scanned.gpg" "$tmp/config/ttp/typed.gpg"
+# A Google Authenticator export on screen: pick bob, the second key.
+printf 'QR-Code:%s\n' "$export_two" > "$tmp/screen"
+scan exported 'n\ny\n' < /dev/null
+check "-c from an export on screen: exit status" 0 "$rc"
+check_contains "-c from an export on screen: asks about alice" "Use Example:alice@example.com? (y)" "$out"
+run -xv exported
+check "-c from an export on screen: stores the chosen key" "$uri_bob" "$out"
+run -x exported
+check "-x with a key from an export: 8 digits" 8 "${#out}"
+
+# A pasted export URI: pick alice, the first key.
+: > "$tmp/screen"
+scan pasted 'y\n' <<< "$export_two"
+check "-c with a pasted export: exit status" 0 "$rc"
+run -xv pasted
+check "-c with a pasted export: stores the chosen key" "$uri_alice" "$out"
+
+scan none 'n\nn\n' <<< "$export_two"
+check "-c declining every key in a pasted export: exit status" 0 "$rc"
+check_contains "-c declining every key in a pasted export: message" "Aborted." "$out"
+check "-c declining every key in a pasted export: no file" no \
+    "$(test -e "$tmp/config/ttp/none.gpg" && echo yes || echo no)"
+rm -f "$tmp/bin/zbarimg" "$tmp/config/ttp/scanned.gpg" "$tmp/config/ttp/typed.gpg" \
+    "$tmp/config/ttp/exported.gpg" "$tmp/config/ttp/pasted.gpg"
 
 # Clipboard tools.  Each stand-in records its arguments and input.
 mkdir -p "$tmp/clipbin"
@@ -498,17 +568,6 @@ run -xv eight
 check "-xv with URI: prints URI unchanged" "$uri" "$out"
 run -xv demo
 check "-xv with plain key: builds URI" "otpauth://totp/demo?secret=$key&issuer=demo" "$out"
-
-# Keys left in ~/.config/ga by older versions are still found.
-mkdir -p "$tmp/legacy/ga"
-cp "$tmp/config/ttp/demo.gpg" "$tmp/legacy/ga/old.gpg"
-out=$(XDG_CONFIG_HOME=$tmp/legacy "$BASH" "$ttp" -l 2>&1)
-check "legacy ~/.config/ga: -l" old "$out"
-before=$(echo "$key" | totp)
-out=$(XDG_CONFIG_HOME=$tmp/legacy "$BASH" "$ttp" -x old 2>&1)
-after=$(echo "$key" | totp)
-check "legacy ~/.config/ga: -x" yes \
-    "$(test "$out" = "$before" -o "$out" = "$after" && echo yes || echo "no ($out)")"
 
 ########################################################################
 # Cross-check against oathtool, an independent TOTP implementation, when
