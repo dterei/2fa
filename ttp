@@ -2,9 +2,11 @@
 
 # ttp - manage TOTP (RFC6238) seeds, compatible with Google Authenticator
 #
-# Copyright 2014 David Mazieres.  You may use and distribute this code
-# under the terms of the GPLv3 or later, and additionally you may link
-# against openssl libcrypto.
+# Copyright 2014-2015 David Mazières.
+# Copyright 2026 David Terei.
+#
+# You may use and distribute this code under the terms of the GNU
+# General Public License, version 3 or later; see COPYING.
 #
 # This program comes with ABSOLUTELY NO WARRANTY.  This program
 # REDUCES YOUR SECURITY by making two-factor authentication not really

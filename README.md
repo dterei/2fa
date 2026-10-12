@@ -124,4 +124,21 @@ David Terei.
 ## Acknowledgments
 
 `ttp` is a fork of [`ga`](https://github.com/scslab/ga), written by
-David Mazi&egrave;res.
+David Mazières.
+
+## License
+
+Copyright 2014-2015 David Mazières.
+Copyright 2026 David Terei.
+
+`ttp` is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your
+option) any later version. See [COPYING](COPYING) for the full text.
+
+This program comes with ABSOLUTELY NO WARRANTY. This program REDUCES
+YOUR SECURITY by making two-factor authentication not really two
+factor. You may decide using this program is useful where the
+alternative is only one factor authentication, but that is your
+decision alone. The author DOES NOT REPRESENT THIS SOFTWARE AS MORE
+SECURE THAN ANY ALTERNATIVE; it most likely is less secure.
