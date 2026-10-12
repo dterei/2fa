@@ -7,6 +7,7 @@ on:
 
 jobs:
   test:
+    name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -15,8 +16,36 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-      - name: Install GnuPG
-        if: runner.os == 'macOS'
-        run: command -v gpg || brew install gnupg
+      - name: Install dependencies
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            command -v gpg || brew install gnupg
+            brew install oath-toolkit
+          else
+            sudo apt-get update
+            sudo apt-get install -y oathtool
+          fi
       - name: Run tests
         run: /bin/bash test/run-tests.sh
+
+  bash-versions:
+    name: bash ${{ matrix.bash }}
+    strategy:
+      fail-fast: false
+      matrix:
+        bash: ['3.2', '4.0', '4.2', '4.4', '5.0', '5.1', '5.2', '5.3']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run tests in the official bash ${{ matrix.bash }} image
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src bash:${{ matrix.bash }} sh -c '
+            apk add --no-cache gnupg oath-toolkit-oathtool > /dev/null &&
+            bash test/run-tests.sh'
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run ShellCheck
+        run: shellcheck ttp test/run-tests.sh

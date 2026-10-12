@@ -104,10 +104,15 @@ Master [git repository](https://github.com/dterei/ttp):
     bash test/run-tests.sh
 
 The tests need only bash and gpg, and leave your keys alone: they use a
-temporary directory and their own GnuPG home. They run `ttp` with
-whichever bash runs the test script, so `/bin/bash test/run-tests.sh` on
-macOS tests the system's bash 3.2. GitHub Actions runs them on Linux and
-macOS for every pull request.
+temporary directory and their own GnuPG home. If
+[`oathtool`](https://www.nongnu.org/oath-toolkit/) is installed, they
+also check `ttp`'s codes against it. They run `ttp` with whichever bash
+runs the test script, so `/bin/bash test/run-tests.sh` on macOS tests
+the system's bash 3.2.
+
+For every pull request, GitHub Actions runs the tests on Linux and macOS
+and with each bash release from 3.2 to 5.3, and runs
+[ShellCheck](https://www.shellcheck.net/) on the scripts.
 
 ## Authors
 
