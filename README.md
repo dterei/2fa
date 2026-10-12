@@ -10,29 +10,44 @@ Google Authenticator (a.k.a. RFC6238 TOTP) from the shell.
 ## Installing
 
 Just download and install
-[`ttp`](https://raw.githubusercontent.com/dterei/2fa/master/ttp)
+[`ttp`](https://raw.githubusercontent.com/dterei/ttp/master/ttp)
 somewhere on your path (e.g., `$HOME/bin/ttp`).
-
-Requirements:
-
-* bash
-* gnupg
 
 `ttp` is a self-contained bash script; the TOTP code calculation
 (base32 decoding and HMAC-SHA1) is implemented in bash itself, so no C
 compiler or OpenSSL is needed.
+
+### Required dependencies
+
+| Dependency | Used for |
+| --- | --- |
+| bash | Running `ttp`. |
+| [GnuPG](https://gnupg.org/) (`gpg`) | Encrypting the stored keys with a passphrase. |
+| `mkdir` | Creating the key directory. |
+| `date` | Reading the current time, on bash older than 5.0 only. |
+
+`mkdir` and `date` come with every Linux distribution and macOS.
+
+### Optional dependencies
+
+`ttp` uses these if they are installed and works without them.
+
+| Dependency | Used for | Without it |
+| --- | --- | --- |
+| `xclip` or `xsel` (Linux, X11) | Copying the code to the clipboard. | The code is printed. |
+| `pbcopy` (built into macOS) | Copying the code to the clipboard. | The code is printed. |
+| `zbarimg` (from [zbar](https://github.com/mchehab/zbar)) | `-c`: reading a QR code from the screen (X11 only). | You type in the key. |
+| [`qrencode`](https://fukuchi.org/works/qrencode/) | `-v`: showing a key as a QR code. | `-v` doesn't work. |
+| `display` (from [ImageMagick](https://imagemagick.org/)), `xv` or `xloadimage` | `-v`: showing the QR code in a window (X11 only). | The QR code is drawn in the terminal. |
+| `gsettings` (GNOME) | Warning you if GNOME is set to cache your GPG passphrase indefinitely. | The check is skipped. |
+
+### Upgrading from `ga`
 
 `ttp` used to be called `ga`. It stores keys in `~/.config/ttp`, but
 if that doesn't exist and `~/.config/ga` does, it keeps using
 `~/.config/ga`. To switch over, run `mv ~/.config/ga ~/.config/ttp`.
 Older versions of `ga` compiled a helper program into
 `~/.config/ga/bin`; you can delete that directory.
-
-Optional dependencies:
-
-* xclip - to send login codes to the X clipboard instead of stdout
-* zbar - to parse QR codes from screen with -c option
-* qrencode, imagemagick - to display QR codes with -v option
 
 ## Using
 
@@ -66,11 +81,11 @@ We are happy to receive bug reports, fixes, documentation enhancements,
 and other improvements.
 
 Please report bugs via the
-[github issue tracker](https://github.com/dterei/2fa/issues).
+[github issue tracker](https://github.com/dterei/ttp/issues).
 
-Master [git repository](https://github.com/dterei/2fa):
+Master [git repository](https://github.com/dterei/ttp):
 
-* `git clone https://github.com/dterei/2fa.git`
+* `git clone https://github.com/dterei/ttp.git`
 
 ## Authors
 
