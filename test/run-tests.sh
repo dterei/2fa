@@ -223,7 +223,7 @@ printf '#!/bin/sh\nexit 2\n' > "$tmp/failbin/gpg"
 chmod +x "$tmp/bin/gpg" "$tmp/bin/qrencode" "$tmp/failbin/gpg"
 
 export PATH="$tmp/bin:$PATH" GNUPGHOME="$tmp/gnupg" XDG_CONFIG_HOME="$tmp/config"
-unset DISPLAY
+unset DISPLAY WAYLAND_DISPLAY
 
 # run ARGS...: run ttp, setting $out and $rc.
 run() {
@@ -276,6 +276,70 @@ check "-xc with bad key: no file" no "$(test -e "$tmp/config/ttp/bad.gpg" && ech
 
 out=$(PATH="$tmp/failbin:$PATH" "$BASH" "$ttp" -xc broken <<< "$key" 2>&1)
 check "-xc when gpg fails: exit status" 1 "$?"
+
+for name in ../escape a/b .hidden -dash; do
+    for mode in -xc -x -xv; do
+        run $mode "$name" <<< "$key"
+        check "$mode '$name': exit status" 1 "$rc"
+        # With -x, a lone "-dash" argument is rejected as an unknown option.
+        case "$mode $name" in
+            "-x -dash") want="usage:" ;;
+            *) want="invalid service name" ;;
+        esac
+        check_contains "$mode '$name': message" "$want" "$out"
+    done
+done
+check "invalid names: no files written" "demo.gpg" "$(cd "$tmp/config/ttp" && echo *)"
+check "invalid names: nothing outside the key directory" no \
+    "$(test -e "$tmp/config/escape.gpg" && echo yes || echo no)"
+
+run -xc "my bank" <<< "$key"
+check "-xc name with a space: exit status" 0 "$rc"
+run -x "my bank"
+check "-x name with a space: exit status" 0 "$rc"
+rm -f "$tmp/config/ttp/my bank.gpg"
+
+# Clipboard tools.  Each stand-in records its arguments and input.
+mkdir -p "$tmp/clipbin"
+for tool in wl-copy xclip xsel; do
+    cat > "$tmp/clipbin/$tool" <<EOF
+#!/bin/sh
+echo "$tool \$*" > "$tmp/clip"
+cat >> "$tmp/clip"
+EOF
+    chmod +x "$tmp/clipbin/$tool"
+done
+
+# clip ENV...: get a code without -x, with the given environment and the
+# stand-in clipboard tools first on PATH, setting $out, $rc and $clip.
+clip() {
+    rm -f "$tmp/clip"
+    out=$(env PATH="$tmp/clipbin:$PATH" "$@" "$BASH" "$ttp" demo 2>&1)
+    rc=$?
+    clip=$(cat "$tmp/clip" 2>/dev/null)
+}
+before=$(echo "$key" | totp)
+clip WAYLAND_DISPLAY=wayland-0 DISPLAY=:0
+after=$(echo "$key" | totp)
+copied=${clip#*$'\n'}
+check "Wayland: exit status" 0 "$rc"
+check "Wayland: message" "Sending code to Wayland clipboard" "$out"
+check "Wayland: uses wl-copy" "wl-copy " "${clip%%$'\n'*}"
+check "Wayland: copies the code" yes \
+    "$(test "$copied" = "$before" -o "$copied" = "$after" && echo yes || echo "no ($copied)")"
+
+clip DISPLAY=:0
+check "X11: message" "Sending code to X clipboard" "$out"
+check "X11: xclip uses the Ctrl-V clipboard" "xclip -selection clipboard -i" "${clip%%$'\n'*}"
+
+rm "$tmp/clipbin/xclip"
+clip DISPLAY=:0
+check "X11 without xclip: xsel uses the Ctrl-V clipboard" "xsel --clipboard --input" "${clip%%$'\n'*}"
+
+rm -f "$tmp/clip"
+out=$(env PATH="$tmp/clipbin:$PATH" WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 "$BASH" "$ttp" -x demo 2>&1)
+check "-x with Wayland and X11: prints the code" 6 "${#out}"
+check "-x with Wayland and X11: no clipboard" no "$(test -e "$tmp/clip" && echo yes || echo no)"
 
 uri="otpauth://totp/Example%3Aalice%40example.com?secret=$key&issuer=Example&digits=8"
 run -xc eight <<< "$uri"
